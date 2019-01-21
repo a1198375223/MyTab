@@ -8,6 +8,7 @@ import android.support.annotation.Nullable;
 import android.util.AttributeSet;
 import android.util.DisplayMetrics;
 import android.util.TypedValue;
+import android.view.View;
 import android.widget.LinearLayout;
 
 import android.R;
@@ -26,6 +27,8 @@ public class SlidingTabStrip extends LinearLayout {
     private Paint mSelectedIndicatorPaint;                                  // 指示器画笔
 
     private int mDefaultBottomBorderColor;                                  // 默认底部边界颜色
+
+    private int mSelectedPosition = 0;                                      // 记录被选择的子view的position, 默认是0 即第一个被选中
 
 
     public SlidingTabStrip(Context context) {
@@ -88,8 +91,25 @@ public class SlidingTabStrip extends LinearLayout {
      */
     @Override
     protected void onDraw(Canvas canvas) {
-        super.onDraw(canvas);
+        //super.onDraw(canvas);
 
+        int height = getHeight(); // 获取高度
+        int childCount = getChildCount(); // 获取子view的数量
+
+        if (childCount > 0) {
+            View selectedTitle = getChildAt(mSelectedPosition); // 获取被选中的view
+            if (null != selectedTitle) {
+                float left = selectedTitle.getLeft(); // 获取子view的left
+                float right = selectedTitle.getRight(); // 获取子view的right
+                float leftMargin = 0; // 设置leftMargin
+
+                // todo
+
+
+
+            }
+
+        }
     }
 
     /**
