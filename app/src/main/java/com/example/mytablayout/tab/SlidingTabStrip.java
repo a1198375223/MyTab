@@ -11,9 +11,18 @@ import android.util.TypedValue;
 import android.view.View;
 import android.widget.LinearLayout;
 
-import android.R;
+import com.example.mytablayout.R;
 
 
+/**
+ * 自定义指示器
+ * 明确指示器中存在的内容
+ * 例如：底部高度, 底部颜色, position位置, 默认的颜色, 被选中的颜色
+ *
+ * 步骤：
+ * 1. 在构造器中进行必要的初始化
+ * 2. 重写onDraw()方法, 进行绘制自定义的指示器
+ */
 public class SlidingTabStrip extends LinearLayout {
     private final int DEFAULT_BOTTOM_BORDER_COLOR_ALPHA     = 40;           // 默认底部边界透明值
     private final int DEFAULT_BOTTOM_BORDER_THICKNESS_DIP   = 0;            // 默认的底部边界厚度
@@ -27,8 +36,13 @@ public class SlidingTabStrip extends LinearLayout {
     private Paint mSelectedIndicatorPaint;                                  // 指示器画笔
 
     private int mDefaultBottomBorderColor;                                  // 默认底部边界颜色
-
+    private int mIndicatorAnimationMode = SlidingTabLayout.ANI_MODE_NORMAL; // 记录动画效果选择那个来实现
     private int mSelectedPosition = 0;                                      // 记录被选择的子view的position, 默认是0 即第一个被选中
+    private int mIndicatorWidth;                                            // 记录指示器的宽度
+    private float mIndicatorCornerRaduis;                                   // 记录指示器的半径
+
+    private SimpleTabColorShader mDefaultTabColorShader;                    // 默认的ColorShader
+    private SlidingTabLayout.TabColorShader mCustomTabColorShader;          // 自定义的ColorShader
 
 
     public SlidingTabStrip(Context context) {
@@ -54,7 +68,7 @@ public class SlidingTabStrip extends LinearLayout {
         // outValue.data;
         // 来获取
         TypedValue outValue = new TypedValue();
-        context.getTheme().resolveAttribute(R.attr.colorForeground, outValue, true);
+        context.getTheme().resolveAttribute(android.R.attr.colorForeground, outValue, true);
 
         int themeForegroundColor = outValue.data;
 
@@ -81,9 +95,33 @@ public class SlidingTabStrip extends LinearLayout {
 
         // 将指示器厚度单位从dp->px
         mSelectedIndicatorThickness = (int) (SELECTD_INDICATOR_THICKNESS_DIP * density);
-
         mSelectedIndicatorPaint = new Paint();
+
+        // 初始化TabColorShader
+        mDefaultTabColorShader = new SimpleTabColorShader();
+        mDefaultTabColorShader.setIndicatorColors(DEFAULT_SELECTED_INDICATOR_COLOR);
+
+        // 初始化指示器角的半径
+        mIndicatorCornerRaduis = getResources().getDimension(R.dimen.indicator_corner_radius);
     }
+
+    /**
+     * 这个类主要就是用来返回给SlidingTabLayout对应position的color
+     */
+    private class SimpleTabColorShader implements SlidingTabLayout.TabColorShader {
+        private int[] mIndicatorColors;
+
+        @Override
+        public int getIndicatorColor(int position) {
+            return mIndicatorColors[position % mIndicatorColors.length];
+        }
+
+        // 设置color数组
+        public void setIndicatorColors(int... colors) {
+            mIndicatorColors = colors;
+        }
+    }
+
 
 
     /**
@@ -95,6 +133,7 @@ public class SlidingTabStrip extends LinearLayout {
 
         int height = getHeight(); // 获取高度
         int childCount = getChildCount(); // 获取子view的数量
+        SlidingTabLayout.TabColorShader tabColorShader = mDefaultTabColorShader != null ? mDefaultTabColorShader : mCustomTabColorShader;
 
         if (childCount > 0) {
             View selectedTitle = getChildAt(mSelectedPosition); // 获取被选中的view
@@ -103,7 +142,9 @@ public class SlidingTabStrip extends LinearLayout {
                 float right = selectedTitle.getRight(); // 获取子view的right
                 float leftMargin = 0; // 设置leftMargin
 
-                // todo
+                if (mIndicatorAnimationMode == SlidingTabLayout.ANI_MODE_TAIL && mIndicatorWidth > 0) {
+                    leftMargin = (right - left - mIndicatorWidth) / 2.0f;
+                }
 
 
 
