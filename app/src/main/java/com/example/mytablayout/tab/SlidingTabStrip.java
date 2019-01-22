@@ -1,17 +1,24 @@
 package com.example.mytablayout.tab;
 
+import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.support.annotation.Nullable;
 import android.util.AttributeSet;
 import android.util.DisplayMetrics;
+import android.util.Log;
 import android.util.TypedValue;
 import android.view.View;
+import android.view.animation.AccelerateInterpolator;
 import android.widget.LinearLayout;
 
 import com.example.mytablayout.R;
+
+import static android.content.ContentValues.TAG;
 
 
 /**
@@ -27,7 +34,8 @@ public class SlidingTabStrip extends LinearLayout {
     private final int DEFAULT_BOTTOM_BORDER_COLOR_ALPHA     = 40;           // 默认底部边界透明值
     private final int DEFAULT_BOTTOM_BORDER_THICKNESS_DIP   = 0;            // 默认的底部边界厚度
     private final int DEFAULT_SELECTED_INDICATOR_COLOR      = 0xFF33B5E5;   // tab被选中的指示器默认颜色
-    private final float SELECTD_INDICATOR_THICKNESS_DIP     = 2.66f;        // 默认指示器的厚度（4px->4像素）
+    private final float SELECTED_INDICATOR_THICKNESS_DIP    = 2.66f;        // 默认指示器的厚度（4px->4像素）
+    private final int AVOID_DITHERING_THRESHOLD              = 4;            // 防止抖动的阈值
 
     private int mBottomBorderThickness;                                     // 底部边界的厚度
     private Paint mBottomBorderPaint;                                       // 绘制底部边界的画笔
@@ -38,11 +46,22 @@ public class SlidingTabStrip extends LinearLayout {
     private int mDefaultBottomBorderColor;                                  // 默认底部边界颜色
     private int mIndicatorAnimationMode = SlidingTabLayout.ANI_MODE_NORMAL; // 记录动画效果选择那个来实现
     private int mSelectedPosition = 0;                                      // 记录被选择的子view的position, 默认是0 即第一个被选中
+    private float mSelectionOffset;                                         // 记录被选中的偏移量 -1->0->1 就是你手指拖动, 往左还是往右
     private int mIndicatorWidth;                                            // 记录指示器的宽度
-    private float mIndicatorCornerRaduis;                                   // 记录指示器的半径
+    private float mIndicatorCornerRadius;                                   // 记录指示器的半径
 
     private SimpleTabColorShader mDefaultTabColorShader;                    // 默认的ColorShader
     private SlidingTabLayout.TabColorShader mCustomTabColorShader;          // 自定义的ColorShader
+
+    private boolean mIsTabAsDividerMode;                                    // 判断tab是否是DISTRIBUTE_MODE_TAB_AS_DIVIDER分割模式
+    private float mLastRight;                                               // 记录最新的right的位置
+    private int mIndicatorTopMargin;                                        // 记录指示器top的margin值
+    private int mIndicatorBottomMargin;                                     // 记录指示器bottom的margin值
+    private GradientDrawable mIndicatorDrawable;                            // 记录指示器的图片
+
+    // 用来返回tab对应的指示器坐标给SlidingTabStrip
+    private SlidingTabLayout.ITabNameBottomPositionGetter mTabNameBottomPositionGetter;
+
 
 
     public SlidingTabStrip(Context context) {
@@ -94,7 +113,7 @@ public class SlidingTabStrip extends LinearLayout {
         mBottomBorderPaint.setColor(mDefaultBottomBorderColor);
 
         // 将指示器厚度单位从dp->px
-        mSelectedIndicatorThickness = (int) (SELECTD_INDICATOR_THICKNESS_DIP * density);
+        mSelectedIndicatorThickness = (int) (SELECTED_INDICATOR_THICKNESS_DIP * density);
         mSelectedIndicatorPaint = new Paint();
 
         // 初始化TabColorShader
@@ -102,7 +121,14 @@ public class SlidingTabStrip extends LinearLayout {
         mDefaultTabColorShader.setIndicatorColors(DEFAULT_SELECTED_INDICATOR_COLOR);
 
         // 初始化指示器角的半径
-        mIndicatorCornerRaduis = getResources().getDimension(R.dimen.indicator_corner_radius);
+        mIndicatorCornerRadius = getResources().getDimension(R.dimen.indicator_corner_radius);
+    }
+
+    /**
+     * 设置颜色的透明度,将color设置成透明度为alpha
+     */
+    private int setColorAlpha(int color, int alpha) {
+        return Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color));
     }
 
     /**
@@ -117,7 +143,7 @@ public class SlidingTabStrip extends LinearLayout {
         }
 
         // 设置color数组
-        public void setIndicatorColors(int... colors) {
+        void setIndicatorColors(int... colors) {
             mIndicatorColors = colors;
         }
     }
@@ -142,23 +168,235 @@ public class SlidingTabStrip extends LinearLayout {
                 float right = selectedTitle.getRight(); // 获取子view的right
                 float leftMargin = 0; // 设置leftMargin
 
+                //
                 if (mIndicatorAnimationMode == SlidingTabLayout.ANI_MODE_TAIL && mIndicatorWidth > 0) {
                     leftMargin = (right - left - mIndicatorWidth) / 2.0f;
                 }
 
+                // 得到当前tab的指示器颜色
+                int color = tabColorShader.getIndicatorColor(getTabIndex(mSelectedPosition));
 
+                // 如果现在处于滑动状态, 获取即将进入的tab的指示器的颜色
+                // 往右边滑动
+                if (mSelectionOffset > 0 && mSelectedPosition < (getChildCount() - 1)) {
+                    int nextColor = tabColorShader.getIndicatorColor(getTabIndex(mSelectedPosition + 1));
+                    if (color != nextColor) {
+                        color = blendColors(nextColor, color, mSelectionOffset);
+                    }
 
-            }
+                    // 获取即将进入的tab的View
+                    View nextTitle = getChildAt(mSelectedPosition + 1);
 
+                    // 处理动画效果
+                    switch (mIndicatorAnimationMode) {
+
+                        case SlidingTabLayout.ANI_MODE_NORMAL:  // 无特殊动画, 直接平移
+                            left = (int) (mSelectionOffset * nextTitle.getLeft() + (1.0f - mSelectionOffset) * left);
+                            right = (int) (mSelectionOffset * nextTitle.getRight() + (1.0f - mSelectionOffset) * right);
+                            break;
+                        case SlidingTabLayout.ANI_MODE_TAIL:    // 带动画效果 todo 测试一下什么效果, 我感觉是先拉伸然后逐渐变小
+                            int moveDimen = (nextTitle.getWidth() + selectedTitle.getWidth()) / 2;
+                            left += Math.pow(mSelectionOffset, 2) * moveDimen;
+                            right += Math.sqrt(mSelectionOffset) * moveDimen;
+                            break;
+                        default:
+                    }
+
+                    mLastRight = right;
+                }
+
+                if (mIndicatorAnimationMode == SlidingTabLayout.ANI_MODE_NORMAL && mIndicatorWidth > 0) {
+                    leftMargin = (right - left - mIndicatorWidth) / 2.0f;
+                }
+
+                //设置被选中指示器的画笔颜色
+                mSelectedIndicatorPaint.setColor(color);
+
+                if (mIndicatorTopMargin > 0) {
+                    //画圆角矩形
+                    int tabTitleBottom = mTabNameBottomPositionGetter.getTabNameBottomPosition(selectedTitle);
+                    drawRoundRect((int) (left + leftMargin), tabTitleBottom + mIndicatorTopMargin,
+                            (int) (right - leftMargin), (int) (tabTitleBottom + mIndicatorTopMargin + mSelectedIndicatorThickness),
+                            color, canvas);
+
+                } else {
+                    drawRoundRect((int) (left + leftMargin), (int) (height - mIndicatorBottomMargin - mSelectedIndicatorThickness),
+                            (int) (right - leftMargin), height - mIndicatorBottomMargin,
+                            color, canvas);
+                }
+            } // end if
         }
+        canvas.drawRect(0, height - mBottomBorderThickness, getWidth(), height, mBottomBorderPaint);
     }
 
     /**
-     * 设置颜色的透明度,将color设置成透明度为alpha
+     * 返回tab的position
      */
-    private int setColorAlpha(int color, int alpha) {
-        return Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color));
+    private int getTabIndex(int childIndex) {
+        if (mIsTabAsDividerMode) {
+            childIndex--;
+        }
+        return childIndex;
+    }
+
+    /**
+     * 按照比例(ratio)融合2个颜色
+     * 1.0 return color1    0.5 平均融合2颜色   0 return color2
+     */
+    private int blendColors(int color1, int color2, float ratio) {
+        float inverseRatio = 1.0f - ratio;
+        float r = (Color.red(color1) * ratio) + (Color.red(color2) * inverseRatio);
+        float g = (Color.green(color1) * ratio) + (Color.green(color2) * inverseRatio);
+        float b = (Color.blue(color1) * ratio) + (Color.blue(color2) * inverseRatio);
+        return Color.rgb((int)r, (int)g, (int)b);
+    }
+
+    /**
+     * 定义一个方法来绘制圆角矩形
+     */
+    private void drawRoundRect(int left, int top, int right, int bottom, int color, Canvas canvas) {
+        if (mIndicatorDrawable == null) {
+            mIndicatorDrawable = (GradientDrawable) getResources().getDrawable(R.drawable.tab_strip_drawable);
+        }
+        mIndicatorDrawable.setBounds(left, top, right, bottom);
+        mIndicatorDrawable.setColor(color);
+        mIndicatorDrawable.setCornerRadius(mIndicatorCornerRadius);
+        mIndicatorDrawable.draw(canvas);
     }
 
 
+
+    /*----------------------------------------------------------------------------------------*/
+    /*-----------------------------------属性的set方法-----------------------------------------*/
+
+    /**
+     * 设置IndicatorBottomMargin
+     */
+    public void setIndicatorBottomMargin(int indicatorBottomMargin) {
+        mIndicatorBottomMargin = indicatorBottomMargin;
+        mIndicatorTopMargin = 0;
+        mTabNameBottomPositionGetter = null;
+        invalidate();
+    }
+
+
+    /**
+     * 设置IndicatorTopMargin
+     */
+    public void setIndicatorTopMargin(int indicatorTopMargin, SlidingTabLayout.ITabNameBottomPositionGetter positionGetter) {
+        mIndicatorTopMargin = indicatorTopMargin;
+        mTabNameBottomPositionGetter = positionGetter;
+        mIndicatorBottomMargin = 0;
+        invalidate();
+    }
+
+    /**
+     * 设置IndicatorWidth
+     */
+    public void setIndicatorWidth(int indicatorWidth) {
+        mIndicatorWidth = indicatorWidth;
+        invalidate();
+    }
+
+    /**
+     * 设置SelectedIndicatorThickness
+     */
+    public void setSelectedIndicatorThickness(float selectedIndicatorThickness) {
+        this.mSelectedIndicatorThickness = selectedIndicatorThickness;
+    }
+
+    /**
+     * 设置IndicatorCornerRadius
+     */
+    public void setIndicatorCornerRadius(float indicatorCornerRadius) {
+        this.mIndicatorCornerRadius = indicatorCornerRadius;
+    }
+
+    /**
+     * 设置TabAsDividerMode
+     */
+    public void setTabAsDividerMode(boolean isTabAsDividerMode) {
+        mIsTabAsDividerMode = isTabAsDividerMode;
+    }
+
+    /**
+     * 设置IndicatorAnimationMode
+     */
+    public void setIndicatorAnimationMode(int mode) {
+        this.mIndicatorAnimationMode = mode;
+    }
+
+    /**
+     * 设置CustomTabColorShader
+     */
+    public void setCustomTabColorShader(SlidingTabLayout.TabColorShader customTabColorShader) {
+        this.mCustomTabColorShader = customTabColorShader;
+        invalidate();
+    }
+
+    /**
+     * 为DefaultTabColorShader设置颜色
+     */
+    public void setSelectedIndicatorColors(int... colors) {
+        mCustomTabColorShader = null;
+        mDefaultTabColorShader.setIndicatorColors(colors);
+        invalidate();
+    }
+
+    /*---------------------------------------end----------------------------------------------*/
+    /*----------------------------------------------------------------------------------------*/
+
+
+    /**
+     * 最后定义一个方法来监听绑定的ViewPager的页面是否发生了变化
+     */
+    public void onViewPagerPageChanged(final int position, float positionOffset) {
+
+        //Log.d(TAG, "onViewPagerPageChanged: offset = " + positionOffset);
+        mSelectedPosition = getChildIndex(position);
+
+        float right = -1;
+        // 获取选中View的right
+        if (getChildCount() > 0) {
+            View view = getChildAt(mSelectedPosition);
+            if (null != view) {
+                right = view.getRight();
+            }
+        }
+
+//        if (positionOffset == 0) { //防止一下抖动
+//            if (mSelectionOffset > 0 && right != -1 && Math.abs(mLastRight - right) >= AVOID_DITHERING_THRESHOLD) {
+//                //Log.d(TAG, "onAnimationUpdate: 触发的offset = " + mSelectionOffset + " final right : " + right + " now right : " + mLastRight);
+//                final boolean goLeft = mLastRight > right;
+//                ValueAnimator animator = ValueAnimator.ofFloat(1, 0);
+//                animator.setDuration(5000);
+//                final float finalRight = right;
+//                animator.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+//                    @Override
+//                    public void onAnimationUpdate(ValueAnimator animation) {
+//                        float currentValue = (float) animation.getAnimatedValue();
+//                        if (goLeft) {
+//                            mSelectionOffset = mSelectionOffset * currentValue;
+//                        } else {
+//                            mSelectionOffset = mSelectionOffset + (1 - mSelectionOffset) * (1 - currentValue);
+//                        }
+//                        //Log.d(TAG, "onAnimationUpdate: position = " + position + " offset = " + mSelectionOffset);
+//                        invalidate();
+//                    }
+//                });
+//                animator.setInterpolator(new AccelerateInterpolator());
+//                animator.start();
+//                return;
+//            }
+//        }
+        mSelectionOffset = positionOffset;
+        invalidate();
+    }
+
+    private int getChildIndex(int tabIndex) {
+        if (mIsTabAsDividerMode) {
+            tabIndex++;
+        }
+        return tabIndex;
+    }
 }

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <com.example.mytablayout.tab.SlidingTabLayout
+        android:layout_width="wrap_content"
+        android:layout_height="99.99dp"
+        android:id="@+id/my_tab_layout"
+        android:layout_centerHorizontal="true"/>
+
+    <View
+        android:id="@+id/split_line"
+        android:layout_width="match_parent"
+        android:layout_height="0.667dp"
+        android:background="@color/yellow"
+        android:layout_below="@+id/my_tab_layout"
+        android:layout_marginTop="0.33dp"/>
+
+    <android.support.v4.view.ViewPager
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_below="@id/split_line"
+        android:id="@+id/viewPager"/>
+
+</RelativeLayout>

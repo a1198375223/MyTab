@@ -8,7 +8,24 @@ public class DisplayUtils {
     private int mScreenWidth;
     private int mScreenHeight;
 
-    private void initMeterics(Context context) {
+    private static DisplayUtils sINSTANCE;
+
+    public static DisplayUtils getInstance(Context context) {
+        if (sINSTANCE == null) {
+            synchronized (DisplayUtils.class) {
+                if (sINSTANCE == null) {
+                    sINSTANCE = new DisplayUtils(context);
+                }
+            }
+        }
+        return sINSTANCE;
+    }
+
+    private DisplayUtils(Context context) {
+        initMetrics(context);
+    }
+
+    private void initMetrics(Context context) {
         DisplayMetrics metrics = context.getApplicationContext().getResources().getDisplayMetrics();
         if (metrics != null) {
             mScreenHeight = Math.max(metrics.heightPixels, metrics.widthPixels);
@@ -36,5 +53,9 @@ public class DisplayUtils {
 
     public int getPhoneWidth() {
         return mScreenWidth;
+    }
+
+    public int getPhoneHeight() {
+        return mScreenHeight;
     }
 }

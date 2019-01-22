@@ -6,30 +6,16 @@
     android:layout_height="match_parent"
     tools:context=".MainActivity">
 
-    <!--tabBackground       : 设置tab的背景颜色-->
-    <!--tabContentStart     : 相对起始位置tab的Y轴偏移量-->
-    <!--tabGravity          : tab的布局方式，两个值GRAVITY_CENTER （内容中心显示） 和 GRAVITY_FILL （内容尽可能充满TabLayout）-->
-    <!--tabIndicatorColor   : 设置tab指示器(tab的下划线)的颜色-->
-    <!--tabIndicatorHeight  : 设置tab指示器(tab的下划线)的高度-->
-    <!--tabMaxWidth         : 设置tab选项卡的最大宽度-->
-    <!--tabMinWidth         : 设置tab选项卡的最小宽度-->
-    <!--tabMode             : 设置布局中tab选项卡的行为模式，两个常量MODE_FIXED （固定的tab）和 MODE_SCROLLABLE（滑动的tab）-->
-    <!--tabPadding          : 设置tab的内边距（上下左右）-->
-    <!--tabPaddingBottom    : 设置tab的底部内边距-->
-    <!--tabPaddingEnd       : 设置tab的右侧内边距-->
-    <!--tabPaddingStart     : 设置tab的左侧内边距-->
-    <!--tabPaddingTop       : 设置tab的上方内边距-->
-    <!--tabSelectedTextColor: 设置tab被选中时的文本颜色-->
-    <!--tabTextColor        : 设置tab默认的文本颜色-->
-    <!--tabTextAppearance   : 设置tab的TextAppearance样式的引用，可以引用另一个资源，形式为“@ [+] [package：] type / name”或主题属性，格式为“？[package：] type / name”-->
-   <android.support.design.widget.TabLayout
-       android:layout_width="match_parent"
-       android:layout_height="wrap_content"
-       android:id="@+id/tabLayout"/>
-
-    <android.support.v4.view.ViewPager
+    <Button
         android:layout_width="match_parent"
-        android:id="@+id/viewPager"
-        android:layout_height="match_parent"
-        android:layout_below="@+id/tabLayout"/>
+        android:layout_height="wrap_content"
+        android:text="start my tab"
+        android:id="@+id/my_tab"/>
+
+    <Button
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/my_tab"
+        android:text="start tab"
+        android:id="@+id/tab"/>
 </RelativeLayout>

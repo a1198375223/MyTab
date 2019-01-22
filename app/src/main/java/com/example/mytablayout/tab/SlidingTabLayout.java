@@ -3,20 +3,26 @@ package com.example.mytablayout.tab;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.Typeface;
+import android.support.annotation.ColorInt;
+import android.support.annotation.NonNull;
 import android.support.v4.view.PagerAdapter;
 import android.support.v4.view.ViewPager;
 import android.util.AttributeSet;
 import android.util.Log;
+import android.util.SparseArray;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
+import android.widget.RelativeLayout;
 import android.widget.TextView;
 
 import com.example.mytablayout.utils.CommonUtils;
+import com.example.mytablayout.utils.DisplayUtils;
 
 
 /**
@@ -41,24 +47,27 @@ public class SlidingTabLayout extends HorizontalScrollView {
     public static final int ANI_MODE_NORMAL = 0;                    // 无变化平移
     public static final int ANI_MODE_TAIL = 1;                      // 带小尾巴的效果
 
-    private final int TITLE_OFFSET_DIP      = 24;                    // title偏移量（dp）
-    private final int TAB_VIEW_PADDING_DIP  = 16;                    // tab的padding(dp)
-    private final int TAB_VIEW_TEXT_SIZE_SP = 12;                    // tab的text大小（sp）
+    private final int TITLE_OFFSET_DIP      = 24;                   // title偏移量（dp）
+    private final int TAB_VIEW_PADDING_DIP  = 16;                   // tab的padding(dp)
+    private final int TAB_VIEW_TEXT_SIZE_SP = 12;                   // tab的text大小（sp）
+    private final float DEFAULT_NORMAL_TEXT_SIZE = 16.33f;          // 默认的正常文本大小
+    private final float DEFAULT_SELECTED_TEXT_SIZE = 22.67f;        // 默认被选中文本的大小
 
     /**
      * 这几个模式就是用来实现不同的tab效果的
      */
-    private final int DISTRIBUTE_MODE_AVERAGE_SEGMENTATION  = 3;     // 每个item的间隔相同
-    private final int DISTRIBUTE_MODE_TAB_AS_DIVIDER        = 2;     // 如果有n个Tab，则把屏幕宽度分为n+1部分，Tab的标题的中线与每部分的分隔线重合
-    private final int DISTRIBUTE_MODE_TAB_IN_SECTION_CENTER = 1;     // 如果有n个Tab，则把屏幕宽度分为n部分，Tab的标题在每部分居中
-    private final int DISTRIBUTE_MODE_NONE                  = 0;     // 不对加入TabStrip的每个Tab的LayoutParams做任何处理
-    private int mDistributeMode = DISTRIBUTE_MODE_NONE;              // 默认不做处理
+    public static final int DISTRIBUTE_MODE_AVERAGE_SEGMENTATION  = 3;     // 每个item的间隔相同
+    public static final int DISTRIBUTE_MODE_TAB_AS_DIVIDER        = 2;     // 如果有n个Tab，则把屏幕宽度分为n+1部分，Tab的标题的中线与每部分的分隔线重合
+    public static final int DISTRIBUTE_MODE_TAB_IN_SECTION_CENTER = 1;     // 如果有n个Tab，则把屏幕宽度分为n部分，Tab的标题在每部分居中
+    public static final int DISTRIBUTE_MODE_NONE                  = 0;     // 不对加入TabStrip的每个Tab的LayoutParams做任何处理
+    public  int mDistributeMode = DISTRIBUTE_MODE_NONE;              // 默认不做处理
 
     private int mTitleOffset;                                        // title的偏移量
     private int mTabViewTextViewId;                                  // 存储布局文件中的TextView的id
     private int mTabViewLayoutId;                                    // 存储layout文件的id
 
-    private int mTitleSize = 0;                                      // 存储文字的大小
+    private float mNormalTitleSize = 0;                              // 存储文字的大小
+    private float mSelectedTitleSize = 0;                            // 存储文字被选中的大小
     private ColorStateList mTitleTextColor;                          // 存储显示文字的颜色
 
     private ViewPager mViewPager;                                    // 关联ViewPager
@@ -66,7 +75,15 @@ public class SlidingTabLayout extends HorizontalScrollView {
 
     private SlidingTabStrip mTabStrip;                               // 子tab
 
-    private CustomUiListener mCustomUiListener;                      //
+    private CustomUiListener mCustomUiListener;                      // 自定义ui listener, 外部灵活控制显示和隐藏title的一部分
+
+    private int mLastPosition = 0;                                   // 记录最新的position位置
+    private int mCurrentPosition = 0;                                // 记录当前坐标的位置
+
+    private int mDefaultSelected = 0;
+
+    // 记录ContentDescriptions
+    private SparseArray<String> mContentDescriptions = new SparseArray<>();
 
     public SlidingTabLayout(Context context) {
         this(context, null);
@@ -89,9 +106,10 @@ public class SlidingTabLayout extends HorizontalScrollView {
 
         mTabStrip = new SlidingTabStrip(context);
         // 设定内容居中
-        // todo 这里换成CENTER_VERTICAL会不会更好 待测试
         mTabStrip.setGravity(Gravity.CENTER_HORIZONTAL);
-        addView(mTabStrip, ViewPager.LayoutParams.MATCH_PARENT, ViewPager.LayoutParams.WRAP_CONTENT);
+        addView(mTabStrip, ViewPager.LayoutParams.MATCH_PARENT, ViewPager.LayoutParams.MATCH_PARENT);
+
+        setTextChangeSize(DEFAULT_NORMAL_TEXT_SIZE, DEFAULT_SELECTED_TEXT_SIZE);
     }
 
     /*------------------------------------step 1 begin----------------------------------------*/
@@ -131,13 +149,12 @@ public class SlidingTabLayout extends HorizontalScrollView {
         PagerAdapter adapter = mViewPager.getAdapter();
         OnClickListener listener = new TabClickListener();
 
-        // 记录所有tab的总宽度
+        // 存储所有item的width值总和来处理平均分配模式
         int totalItemWidth = 0;
-
 
         for (int i = 0; i < adapter.getCount(); i++) {
             if (isTabAsDividerMode() && i == 0) {
-                //todo 感觉是添加了一个占位View
+                // 添加了一个开始分割线
                 addPaddingViewForCenterMode();
             }
 
@@ -157,7 +174,7 @@ public class SlidingTabLayout extends HorizontalScrollView {
                 tabView = createDefaultTabView(getContext());
             }
 
-            // todo
+            // 通过外部对tabView进行必要的处理
             if (tabView != null && mCustomUiListener != null) {
                 mCustomUiListener.onCustomTitle(tabView, i);
             }
@@ -168,39 +185,84 @@ public class SlidingTabLayout extends HorizontalScrollView {
             }
 
             // 通过不同的分割模式来处理tabView
-            // todo 为什么这样设置值
-            if (tabView != null && mDistributeMode > DISTRIBUTE_MODE_NONE) {
-                LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) tabView.getLayoutParams();
-                distributeTab(lp);
-            }
+            // 如果设置了分割模式则对每一个tabView就进行参数变化
+            // todo 感觉没啥用啊 待测试删除是否会显示有影响
+//            if (tabView != null && mDistributeMode > DISTRIBUTE_MODE_NONE) {
+//                LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) tabView.getLayoutParams();
+//                distributeTab(lp);
+//            }
 
             // 设置tabTitleView的字体大小和颜色
             if (tabTitleView != null) {
-                if (mTitleSize > 0) {
-                    tabTitleView.setTextSize(mTitleSize);
+                if (i == mViewPager.getCurrentItem()) {
+                    tabTitleView.setTextSize(mSelectedTitleSize);
+                    tabTitleView.setTypeface(Typeface.defaultFromStyle(Typeface.BOLD));
+                } else {
+                    tabTitleView.setTextSize(mNormalTitleSize);
+                    tabTitleView.setTypeface(Typeface.defaultFromStyle(Typeface.NORMAL));
                 }
+
                 if (mTitleTextColor != null) {
                     tabTitleView.setTextColor(mTitleTextColor);
                 }
                 // 为tabTitleView设置文本
                 tabTitleView.setText(adapter.getPageTitle(i));
+                //Log.d(TAG, "populateTabStrip: title : " + adapter.getPageTitle(i));
             }
 
             if (tabView != null) {
                 // 设置tabView的点击事件
                 tabView.setOnClickListener(listener);
 
+                // 为tabView添加ContentDescription
+                String desc = mContentDescriptions.get(i, null);
+                if (desc != null) {
+                    tabView.setContentDescription(desc);
+                }
+
+                if (mDistributeMode == DISTRIBUTE_MODE_AVERAGE_SEGMENTATION) {
+                    tabView.measure(MeasureSpec.UNSPECIFIED, MeasureSpec.UNSPECIFIED);
+                    totalItemWidth = totalItemWidth + tabView.getMeasuredWidth();
+                }
+
+                mTabStrip.addView(tabView);
                 // 设置联动, 如果ViewPager的当前position与tabView的position相同, 将该tabView设置成被选中状态
                 if (i == mViewPager.getCurrentItem()) {
                     tabView.setSelected(true);
                 }
             }
 
-            //todo 感觉是添加了一个占位View
+            // 添加了一个结束分割线
             if (isTabAsDividerMode() && i == adapter.getCount() - 1) {
                 addPaddingViewForCenterMode();
             }
         } // end for
+
+        if (mDistributeMode == DISTRIBUTE_MODE_AVERAGE_SEGMENTATION && adapter.getCount() > 1) {
+            int layoutWidth = DisplayUtils.getInstance(getContext()).getPhoneWidth();
+
+            if (getLayoutParams() instanceof RelativeLayout.LayoutParams) {
+                RelativeLayout.LayoutParams layoutParams = (RelativeLayout.LayoutParams) getLayoutParams();
+                layoutWidth = layoutWidth - layoutParams.leftMargin - layoutParams.rightMargin;
+            } else if (getLayoutParams() instanceof LinearLayout.LayoutParams) {
+                LinearLayout.LayoutParams layoutParams = (LinearLayout.LayoutParams) getLayoutParams();
+                layoutWidth = layoutWidth - layoutParams.leftMargin - layoutParams.rightMargin;
+            } else if (getLayoutParams() instanceof FrameLayout.LayoutParams) {
+                FrameLayout.LayoutParams layoutParams = (FrameLayout.LayoutParams) getLayoutParams();
+                layoutWidth = layoutWidth - layoutParams.leftMargin - layoutParams.rightMargin;
+            }
+
+            int average_segmentation = (layoutWidth - totalItemWidth) / (adapter.getCount() - 1);
+
+            for (int i = 0; i < mTabStrip.getChildCount(); i++) {
+                if (i > 0) {
+                    View child = mTabStrip.getChildAt(i);
+                    LinearLayout.LayoutParams layoutParams = (LinearLayout.LayoutParams) child.getLayoutParams();
+                    layoutParams.leftMargin = average_segmentation;
+                    child.setLayoutParams(layoutParams);
+                }
+            }
+        }
     }
 
     /**
@@ -241,10 +303,8 @@ public class SlidingTabLayout extends HorizontalScrollView {
         return mDistributeMode == DISTRIBUTE_MODE_TAB_AS_DIVIDER;
     }
 
-
     /**
-     * 添加一个view作为？
-     * todo 我暂时想的是为view设置一个背景来看一下是什么
+     * 添加一个view作为分割线吧
      */
     private void addPaddingViewForCenterMode() {
         View paddingView = new View(getContext());
@@ -254,7 +314,7 @@ public class SlidingTabLayout extends HorizontalScrollView {
     }
 
     /**
-     * 定义一个CustomUiListener来监听 todo
+     * 定义一个CustomUiListener来监听 让外部灵活控制显示和隐藏title的一部分
      */
     public interface CustomUiListener {
         void onCustomTitle(View titleView, int position);
@@ -276,6 +336,36 @@ public class SlidingTabLayout extends HorizontalScrollView {
         }
     }
 
+    /**
+     * 设置自定义的UI Listener
+     */
+    public void setCustomUiListener(CustomUiListener listener) {
+        this.mCustomUiListener = listener;
+    }
+
+    /**
+     * 设置自定义加载布局的id, 和内置的TextView id
+     */
+    public void setCustomTabView(int layoutId, int textViewId) {
+        mTabViewLayoutId = layoutId;
+        mTabViewTextViewId = textViewId;
+    }
+
+    /**
+     * 设置Tab分割模式
+     */
+    public void setDistributeMode(int distributeMode) {
+        mDistributeMode = distributeMode;
+        mTabStrip.setTabAsDividerMode(isTabAsDividerMode());
+    }
+
+    /**
+     * 设置ColorList
+     */
+    public void setSelectedTitleColor(ColorStateList list) {
+        this.mTitleTextColor = list;
+    }
+
     /*------------------------------------step 1 done-----------------------------------------*/
     /*----------------------------------------------------------------------------------------*/
     /*----------------------------------------------------------------------------------------*/
@@ -292,17 +382,77 @@ public class SlidingTabLayout extends HorizontalScrollView {
         int getIndicatorColor(int position);
     }
 
+    /**
+     * 定义一个接口来返回tab名称底部坐标, 即返回底部的位置
+     */
+    public interface ITabNameBottomPositionGetter {
+        int getTabNameBottomPosition(View selectedTitle);
+    }
+
+    /**
+     * 为指示器设置BottomMargin值
+     */
+    public void setIndicatorBottomMargin(int indicatorBottomMargin) {
+        mTabStrip.setIndicatorBottomMargin(indicatorBottomMargin);
+    }
+
+    /**
+     * 为指示器设置TopMartin值
+     */
+    public void setIndicatorTopMargin(int indicatorTopMargin, ITabNameBottomPositionGetter positionGetter) {
+        mTabStrip.setIndicatorTopMargin(indicatorTopMargin, positionGetter);
+    }
+
+    /**
+     * 为指示器设置width值
+     */
+    public void setIndicatorWidth(int indicatorWidth) {
+        mTabStrip.setIndicatorWidth(indicatorWidth);
+    }
+
+    /**
+     * 为指示器设置厚度
+     */
+    public void setSelectedIndicatorThickness(float mSelectedIndicatorThickness) {
+        mTabStrip.setSelectedIndicatorThickness(mSelectedIndicatorThickness);
+    }
+
+    /**
+     * 为指示器设置圆角半径
+     */
+    public void setIndicatorCornerRadius(float indicatorCornerRadius) {
+        mTabStrip.setIndicatorCornerRadius(indicatorCornerRadius);
+    }
+
+    /**
+     * 为指示器设置颜色
+     */
+    public void setSelectedIndicatorColors(int... colors) {
+        mTabStrip.setSelectedIndicatorColors(colors);
+    }
+
+    /**
+     * 设置自定义的tab着色器
+     */
+    public void setCustomTabColorShader(TabColorShader tabColorShader) {
+        mTabStrip.setCustomTabColorShader(tabColorShader);
+    }
+
+    /**
+     * 设置指示器的动画模式
+     */
+    public void setIndicatorAnimationMode(int mode) {
+        mTabStrip.setIndicatorAnimationMode(mode);
+    }
 
     /*------------------------------------step 2 done-----------------------------------------*/
     /*----------------------------------------------------------------------------------------*/
     /*----------------------------------------------------------------------------------------*/
     /*------------------------------------step 3 begin----------------------------------------*/
+    /**
+     * 设置与外界ViewPager的关联
+     */
 
-
-    /*------------------------------------step 3 done-----------------------------------------*/
-    /*----------------------------------------------------------------------------------------*/
-    /*----------------------------------------------------------------------------------------*/
-    /*-----------------------------------other methods----------------------------------------*/
     /**
      * 与ViewPager建立关联, 与setupWithViewPager()设置差不多
      */
@@ -311,8 +461,172 @@ public class SlidingTabLayout extends HorizontalScrollView {
         mTabStrip.removeAllViews();
 
         if (null != viewPager) {
-            viewPager.addOnPageChangeListener(new InternalViewPagerPageChanegeListener());
+            mViewPager = viewPager;
+            viewPager.addOnPageChangeListener(new InternalViewPagerPageChangeListener());
+            // 进行填充
+            populateTabStrip();
         }
+    }
+
+    private class InternalViewPagerPageChangeListener implements ViewPager.OnPageChangeListener {
+        private int mScrollState = 0; // 记录scroll的状态
+        // 0:滑动结束->SCROLL_STATE_IDLE
+        // 1:正在滑动->SCROLL_STATE_DRAGGING
+        // 2:滑动完成（到达新页面）之后会变成0->SCROLL_STATE_SETTLING
+
+        @Override
+        public void onPageScrolled(int position, float positionOffset, int positionOffsetPixels) {
+            //Log.d(TAG, "onPageScrolled: ");
+            int tabStripChildCount = getTabStripTabCount();
+            // 如果索引错误, 不进行处理
+            if ((tabStripChildCount == 0) || (position < 0) || (position >= tabStripChildCount)) {
+                return;
+            }
+
+            // 把滑动也通知指示器
+            mTabStrip.onViewPagerPageChanged(position, positionOffset);
+
+            View selectedTitle = mTabStrip.getChildAt(getTabStripChildIndex(position));
+            int extraOffset = (selectedTitle != null) ? (int) (positionOffset * selectedTitle.getWidth()) : 0;
+
+            scrollToTab(position, extraOffset);
+
+            if (mViewPagerPageChangeListener != null) {
+                mViewPagerPageChangeListener.onPageScrolled(position, positionOffset, positionOffsetPixels);
+            }
+
+        }
+
+        @Override
+        public void onPageSelected(int position) {
+            if (mScrollState == ViewPager.SCROLL_STATE_IDLE) {
+                // 通知指示器滑动结束
+                mTabStrip.onViewPagerPageChanged(position, 0f);
+                scrollToTab(position, 0);
+            }
+
+            // 改变TextView文本
+            mCurrentPosition = position;
+            changeText();
+
+            int tabStripPosition = getTabStripChildIndex(position);
+
+            // 改变指示器的状态
+            for (int i = 0; i < mTabStrip.getChildCount(); i++) {
+                mTabStrip.getChildAt(i).setSelected(tabStripPosition == i);
+            }
+
+            Log.d(TAG, "onPageSelected: position = " + position + " tabStripPosition : "  + tabStripPosition);
+
+            if (mViewPagerPageChangeListener != null) {
+                mViewPagerPageChangeListener.onPageSelected(position);
+            }
+        }
+
+        @Override
+        public void onPageScrollStateChanged(int state) {
+            Log.d(TAG, "onPageScrollStateChanged: " + state);
+            mScrollState = state;
+
+            if (mViewPagerPageChangeListener != null) {
+                mViewPagerPageChangeListener.onPageScrollStateChanged(state);
+            }
+        }
+    }
+
+    /**
+     *  获取Tab的数量,
+     */
+    private int getTabStripTabCount() {
+        int childCount = mTabStrip.getChildCount(); // 获取Tab的数量
+        if (isTabAsDividerMode()) {
+            childCount -= 2;
+        }
+        return childCount;
+    }
+
+    /**
+     * 获取viewPager对应的指示器position
+     */
+    private int getTabStripChildIndex(int viewPagerIndex) {
+        if (isTabAsDividerMode()) {
+            viewPagerIndex++;
+        }
+        return viewPagerIndex;
+    }
+
+    /**
+     * 定义一个方法来滑动到指定position的tab
+     */
+    private void scrollToTab(int viewPagerIndex, int positionOffset) {
+        int tabStripChildCount = getTabStripTabCount();
+        // 如果索引出错则不处理
+        if (tabStripChildCount == 0 || viewPagerIndex < 0 || viewPagerIndex >= tabStripChildCount) {
+            return;
+        }
+
+        View selectedChild = mTabStrip.getChildAt(getTabStripChildIndex(viewPagerIndex));
+        if (selectedChild != null) {
+            int targetScrollX = selectedChild.getLeft() + positionOffset;
+            if (viewPagerIndex > 0 || positionOffset > 0) {
+                targetScrollX -= mTitleOffset;
+            }
+
+            scrollTo(targetScrollX, 0);
+
+            //改为居中对齐，如果要换成原先的居左对齐方式的话把上面的注释去掉
+//            int targetScrollX = (selectedChild.getLeft() + selectedChild.getRight() - getWidth()) / 2 + positionOffset;
+//            scrollTo(targetScrollX, 0);
+        }
+    }
+
+    /**
+     * 设置文本的变化
+     */
+    private void changeText() {
+        if (mCurrentPosition != mLastPosition) {
+            TextView currentText = getTabTextView(getTabStripChildIndex(mCurrentPosition) + 1);
+            if (currentText != null) {
+                currentText.setTextSize(TypedValue.COMPLEX_UNIT_SP, mSelectedTitleSize);
+                currentText.setTypeface(Typeface.defaultFromStyle(Typeface.BOLD));
+            }
+
+            TextView lastText = getTabTextView(getTabStripChildIndex(mLastPosition) + 1);
+            if (lastText != null) {
+                lastText.setTypeface(Typeface.defaultFromStyle(Typeface.NORMAL));
+                lastText.setTextSize(TypedValue.COMPLEX_UNIT_SP, mNormalTitleSize);
+            }
+        }
+        mLastPosition = mCurrentPosition;
+    }
+
+    private TextView getTabTextView(int stripIndex) {
+        View tab = mTabStrip.getChildAt(getTabIndex(stripIndex));
+        if (tab instanceof TextView) {
+            return (TextView) tab;
+        }
+
+        if (tab != null) {
+            return tab.findViewById(mTabViewTextViewId);
+        }
+        return null;
+    }
+
+
+    private int getTabIndex(int stripIndex) {
+        if (isTabAsDividerMode()) {
+            stripIndex--;
+        }
+        return stripIndex;
+    }
+
+
+    /**
+     * 设置文本的大小 默认小文本16.33sp, 大文本22.67sp
+     */
+    public void setTextChangeSize(float normalTextSize, float selectedTextSize) {
+        this.mSelectedTitleSize = selectedTextSize;
+        this.mNormalTitleSize = normalTextSize;
     }
 
     /**
@@ -322,65 +636,29 @@ public class SlidingTabLayout extends HorizontalScrollView {
         this.mViewPagerPageChangeListener = listener;
     }
 
-    /**
-     *  获取TabStrip的数量
-     */
-    private int getTabStripTabCount() {
-        int childCount = mTabStrip.getChildCount(); // 获取TabStrip的数量
-        return childCount;
-    }
-
+    /*------------------------------------step 3 done-----------------------------------------*/
+    /*----------------------------------------------------------------------------------------*/
+    /*----------------------------------------------------------------------------------------*/
+    /*-----------------------------------other methods----------------------------------------*/
 
     /**
-     * 设置Tab分割模式
+     * 重新绘制一次SlidingTabLayout
      */
-    public void setDistributeMode(int distributeMode) {
-        mDistributeMode = distributeMode;
-
+    public void notifyDataChange() {
+        mTabStrip.removeAllViews();
+        populateTabStrip();
     }
 
-
-
-    private void scrollToTab(int viewPagerrTabIndex, int positionOffset) {
-
-    }
-
-
-    private class InternalViewPagerPageChanegeListener implements ViewPager.OnPageChangeListener {
-        private int mScrollState = 0; // 记录scroll的状态
-                                      // 0:滑动结束->SCROLL_STATE_IDLE
-                                      // 1:正在滑动->SCROLL_STATE_DRAGGING
-                                      // 2:滑动完成（到达新页面）之后会变成0->SCROLL_STATE_SETTLING
-
-        @Override
-        public void onPageScrolled(int i, float v, int i1) {
-
-            if (mViewPagerPageChangeListener != null) {
-                Log.d(TAG, "onPageScrolled: ");
-                mViewPagerPageChangeListener.onPageScrolled(i, v, i1);
-            }
-
-        }
-
-        @Override
-        public void onPageSelected(int i) {
-            if (mScrollState == ViewPager.SCROLL_STATE_IDLE) {
-
-            }
-
-            if (mViewPagerPageChangeListener != null) {
-                mViewPagerPageChangeListener.onPageSelected(i);
-            }
-        }
-
-        @Override
-        public void onPageScrollStateChanged(int i) {
-            mScrollState = i;
-
-            if (mViewPagerPageChangeListener != null) {
-                mViewPagerPageChangeListener.onPageScrollStateChanged(i);
-            }
+    /**
+     * 初始ViewPager的位置
+     */
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        if (mViewPager != null) {
+            scrollToTab(mViewPager.getCurrentItem(), 0);
         }
     }
+
 
 }
